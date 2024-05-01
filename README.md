@@ -6,6 +6,7 @@ maqueta.bat modifican sus datos:
 setlocal
 
 REM Establecer las variables de entorno
+
 set USERNAME=holaemal
 set PASSWORD=holapass
 set SCHEDULE_ID=9999999
@@ -32,8 +33,11 @@ Esta version manejamos TELEGRAMBOT , pero tienes que crear tu bot para que obten
 
 AL FINAL DE INDEX.JS
 manejamos lowerdatetime 
+
 const args = process.argv.slice(2);
+
 const currentBookedDate = args[0];
+
 const maxDate = '2024-05-05';   
 // aqui agregamos una fecha limite para que no se reagende muy pronto, por exp me han salido muy muy temprano las citas, esto evitara todo ese conflicto (modificar como desee)
 
