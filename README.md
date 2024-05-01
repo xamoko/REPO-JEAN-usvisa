@@ -23,6 +23,6 @@ node index.js 2024-07-10 %*
 goto loop
 
 
-//////////////////////////////////////////////Ç
+//////////////////////////////////////////////////////////////
 
-Esta version manejamos bot , pero tienes que crear tu bot para que obtengas tu api tokens y erl chat id. si quieres inf  throw a message
+Esta version manejamos TELEGRAMBOT , pero tienes que crear tu bot para que obtengas tu api tokens y el chat id. si quieres inf  throw a message
