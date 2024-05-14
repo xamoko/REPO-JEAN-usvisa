@@ -3,14 +3,27 @@
 import fetch from "node-fetch";
 import cheerio from 'cheerio';
 import TelegramBot from 'node-telegram-bot-api';
-
+import fs from 'fs';
+/********************************************************************* */
+function readUserAgents() {
+  try {
+    const userAgents = fs.readFileSync('useragent.ini', 'utf8').split('\n');
+    return userAgents.filter(ua => ua.trim() !== ''); // Eliminar líneas vacías
+  } catch (err) {
+    console.error('Error al leer el archivo useragent.ini:', err);
+    return []; }}const userAgents = readUserAgents();
+function getRandomUserAgent() {
+  const randomIndex = Math.floor(Math.random() * userAgents.length);
+  return userAgents[randomIndex];
+}
+/*------------------------------------------------------------------*/
 const USERNAME = process.env.USERNAME
 const PASSWORD = process.env.PASSWORD
 const SCHEDULE_ID = process.env.SCHEDULE_ID
 const FACILITY_ID = process.env.FACILITY_ID
 const TELEGRAM_API_KEY = process.env.TELEGRAM_API_KEY;
 const TELEGRAM_GROUP_CHAT_ID = process.env.TELEGRAM_GROUP_CHAT_ID;
-const BASE_URI = 'https://ais.usvisa-info.com/en-ec/niv'
+const BASE_URI = 'https://ais.usvisa-info.com/es-ec/niv'
 
 
 /******************************************************************************************* */
@@ -44,16 +57,26 @@ async function main(currentBookedDate, maxDate, errorCount = 0) {
         log("⛔️ Sin fechas disponibles actualmente.");
         softBlock = true;
       } else if (date > currentBookedDate) {
-        log(`⏩  La fecha más cercana está más lejos de la ya reservada (${currentBookedDate} vs ${date})`);
+        log(`⏩ Fecha actual: ${currentBookedDate} Fecha disponible: ${date}`);
         softBlock = false;
         const message = `⏩ Fecha actual: ${currentBookedDate} Fecha disponible: ${date}`;
         await sendHourlyTelegramNotification(message);
       } else {
-        log("test");
+        if (date > maxDate) {
+          log("Reajustando la fecha de reserva...");
+
+          const currentDate = new Date(currentBookedDate);
+          const maxDateObj = new Date(maxDate);
+          const difference = maxDateObj.getTime() - currentDate.getTime();
+          const differenceInDays = Math.ceil(difference / (1000 * 60 * 60 * 24));
+          currentBookedDate = new Date(currentDate.getTime() + differenceInDays * (1000 * 60 * 60 * 24)).toISOString().slice(0, 10);
+          log(`Fecha de reserva reajustada: ${currentBookedDate}`);
+        }
+
         currentBookedDate = date;
         const time = await checkAvailableTime(sessionHeaders, date);
 
-        book(sessionHeaders, date, time)
+        await book(sessionHeaders, date, time)
           .then(d => {
             log(`✨ Cita reservada para ${date} a las ${time} - ¡Éxito! 🎉`);
             sendTelegramMessage(`✨ ¡Cita reservada para ${date} a las ${time} - Éxito! 🎉`);
@@ -69,7 +92,7 @@ async function main(currentBookedDate, maxDate, errorCount = 0) {
         const currentDate = new Date();
         await sleep((30 - (currentDate.getMinutes() % 30)) * 60);
       } else {
-        await randomSleep(1, 12);
+        await randomSleep(1, 17);
       }
     }
   } catch (err) {
@@ -84,8 +107,8 @@ async function main(currentBookedDate, maxDate, errorCount = 0) {
       lastErrorTime = Date.now();
      
       if (errorCount >= 4) {
-        const minTime = 250;
-        const maxTime = 755;
+        const minTime = 850;
+        const maxTime = 1875;
         const randomTime = Math.floor(Math.random() * (maxTime - minTime + 1)) + minTime;
         const minutesToWait = Math.round(randomTime / 60); 
         log(`Se han producido más de 4 errores consecutivos. Esperando aproximadamente \x1b[33m${minutesToWait}\x1b[0m minutos antes de continuar...`);        await sleep(randomTime);
@@ -144,49 +167,38 @@ async function handleErrors(response) {
 }
 
 /******************************************************************************************* */
-//let loginMessageSent = false; 
 async function login() {
-  //if (!loginMessageSent) {
-   // const loginMessage = '🔐 Iniciando sesión en el sistema...';
-  // await sendTelegramMessage(loginMessage);
-   //loginMessageSent = true; 
-  
-   const anonymousHeaders = await fetch(`${BASE_URI}/users/sign_in`, {
-    method: 'GET', 
-    credentials: 'same-origin', 
-    redirect: 'follow', 
-    agent: null,
-    mode: 'navigate',
+  const userAgent = getRandomUserAgent();
+  console.log('\nUser-Agent seleccionado:\n', userAgent);
+
+  const anonymousHeaders = await fetch(`${BASE_URI}/users/sign_in`, {
     headers: {
-"Content-Type": "text/plain",
-"Referrer-Policy": "strict-origin-when-cross-origin",
-'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/109.0.0.0 Safari/537.36',
-'Cache-Control': 'no-store',
-'Connection': 'keep-alive',
+      "User-Agent": userAgent,
+      "Accept": "*/*",
+      "Accept-Encoding": "gzip, deflate, br",
+      "Connection": "keep-alive",
+      "Referer": BASE_URI,
+      "Content-Type": "text/plain",
+      "Referrer-Policy": "strict-origin-when-cross-origin",
       'Cache-Control': 'no-store',
       'Sec-Fetch-Dest': 'document',
       'Sec-Fetch-mode': 'navigate',
       'Sec-Fetch-Site': 'same-origin',
-
-    },
+    }
   }).then(response => extractHeaders(response));
   
   return fetch(`${BASE_URI}/users/sign_in`, {
     method: "POST",
-    "headers": Object.assign({}, anonymousHeaders, {
+    headers: Object.assign({}, anonymousHeaders, {
       "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-      "Strict-Transport-Security": "max-age=31536000", 
-      "X-Content-Type-Options": "nosniff", 
-      "Content-Security-Policy": "default-src 'self'",
     }),
-    "method": "POST",
-    "body": new URLSearchParams({
+    body: new URLSearchParams({
       'utf8': '✓',
       'user[email]': USERNAME,
       'user[password]': PASSWORD,
       'policy_confirmed': '1',
       'commit': 'Submit' 
-      }),
+    }),
   })
   .then(res => (
     Object.assign({}, anonymousHeaders, {
@@ -200,37 +212,28 @@ function fetchData(url, headers) {
   headers = Object.assign({}, headers, {
     'Accept': 'application/json',
     "X-Requested-With": "XMLHttpRequest",
-    'Cache-Control': 'no-cache',
     'Connection': 'keep-alive',
     'Sec-Fetch-Mode': 'navigate',
     'Sec-Fetch-Site': 'same-origin',
     'Upgrade-Insecure-Requests': '1',
-    'Pragma': 'no-cache',
-    'Accept-Language': 'en-US,en;q=0.9',
-    'Accept-Encoding': 'gzip, deflate, br',
-    //'DNT': '1', 
-    //'Keep-Alive': 'timeout=0, max=0', 
+
   });
 
   return fetch(url, {
     headers: headers,
     credentials: 'same-origin', 
-    redirect: 'follow', 
     agent: null,
-    mode: 'navigate',
-    cache: "no-store",
+   ///mode: 'navigate',
     keepalive: true,
-    referrerPolicy: 'strict-origin',
   })
   .then(r => {
     if (!r.ok) {
-      throw { status: r.status, message: `Error ${r.status}` };
+      throw { status: response.status, message: `Error ${response.status}` };
     }
     return r.json();
   })
   .then(r => handleErrors(r));
 }
-
 /******************************************************************************************* */
 
 function checkAvailableDate(headers) {
@@ -246,7 +249,8 @@ function checkAvailableTime(headers, date) {
 }
 
 /****************************************************************************************** */
-async function book(headers, date, time) {
+
+/*async function book(headers, date, time) {
   const url = `${BASE_URI}/schedule/${SCHEDULE_ID}/appointment`
 
   const newHeaders = await fetch(url, { "headers": headers })
@@ -271,15 +275,56 @@ async function book(headers, date, time) {
       'appointments[asc_appointment][time]': ''
     }),
   })
+}*/
+
+async function book(headers, date, time) {
+  const url = `${BASE_URI}/schedule/${SCHEDULE_ID}/appointment`;
+
+  try {
+    const newHeadersResponse = await fetch(url, { headers });
+    const newHeaders = await extractHeaders(newHeadersResponse);
+
+    const bodyParams = new URLSearchParams({
+      'utf8': '✓',
+      'authenticity_token': newHeaders['X-CSRF-Token'],
+      'confirmed_limit_message': '1',
+      'use_consulate_appointment_capacity': 'true',
+      'appointments[consulate_appointment][facility_id]': FACILITY_ID,
+      'appointments[consulate_appointment][date]': date,
+      'appointments[consulate_appointment][time]': time,
+      'appointments[asc_appointment][facility_id]': '',
+      'appointments[asc_appointment][date]': '',
+      'appointments[asc_appointment][time]': ''
+    });
+
+    const response = await fetch(url, {
+      method: "POST",
+      redirect: "follow",
+      headers: Object.assign({}, newHeaders, {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      }),
+      body: bodyParams,
+    });
+
+    if (!response.ok) {
+      throw new Error(`La solicitud falló con estado ${response.status}`);
+    }
+    return response;
+  } catch (error) {
+    console.error('Ocurrió un error al reservar la cita:', error.message);
+    throw error;
+  }
 }
+
 /****************************************************************************************** */
 
 
 async function extractHeaders(res) {
-  const cookies = extractRelevantCookies(res)
-  const html = await res.text()
+  const cookies = await extractRelevantCookies(res);
+  const html = await res.text();
   const $ = cheerio.load(html);
-  const csrfToken = $('meta[name="csrf-token"]').attr('content')
+  const csrfToken = $('meta[name="csrf-token"]').attr('content');
+
 
   return {
     "Cookie": cookies,
@@ -291,16 +336,33 @@ async function extractHeaders(res) {
     'Connection': 'keep-alive'
   }
 }
+
 /****************************************************************************************** */
 
-function extractRelevantCookies(res) {
+/*function extractRelevantCookies(res) {
   const setCookieHeader = res.headers.get('set-cookie');
   if (!setCookieHeader) {
     return '';
   }
   const parsedCookies = parseCookies(setCookieHeader);
   return `_yatri_session=${parsedCookies['_yatri_session']}`;
+} */
+
+
+function extractRelevantCookies(res) {
+  const setCookieHeader = res.headers.get('set-cookie');
+  if (!setCookieHeader) {
+    return '';
+  }
+  
+  const parsedCookies = parseCookies(setCookieHeader);
+  const relevantCookies = [];
+  Object.keys(parsedCookies).forEach(cookieName => {
+    relevantCookies.push(`${cookieName}=${parsedCookies[cookieName]}`);
+  });
+  return relevantCookies.join('; ');
 }
+
 function parseCookies(cookies) {
   const parsedCookies = {}
   cookies.split(';').map(c => c.trim()).forEach(c => {
@@ -309,13 +371,14 @@ function parseCookies(cookies) {
   }) 
   return parsedCookies
 }
+
 /****************************************************************************************** */
 
 const randomSleep = (minSeconds, maxSeconds) => {
-  const currentTime = Date.now();
-  const randomDelay = ((Math.random() * (maxSeconds - minSeconds) + minSeconds) * 1000) + (currentTime % 1000); // Agregamos el tiempo actual en milisegundos para mayor aleatoriedad
-  return new Promise(resolve => setTimeout(resolve, randomDelay));
+  const randomDelay = Math.floor(Math.random() * (maxSeconds - minSeconds + 1)) + minSeconds;
+  return new Promise(resolve => setTimeout(resolve, randomDelay * 1000)); // Convertir segundos a milisegundos
 };
+
 
 function sleep(s) {
   return new Promise((resolve) => {
@@ -333,6 +396,6 @@ function log(message) {
 /****************************************************************************************** */
 
 const args = process.argv.slice(2);
-const currentBookedDate = args[0];
-const maxDate = '2024-05-05';
+const currentBookedDate = args[0]; // Establece una fecha predeterminada si no se proporciona ninguna fecha
+const maxDate = args[1] || '2024-05-16'; // Establece una fecha predeterminada si no se proporciona ninguna fecha máxima
 main(currentBookedDate, maxDate);
